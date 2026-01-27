@@ -69,6 +69,8 @@ const int FILE_HEADER_LENGTH = 12;
 const int ALIGNMENT_PADD = 1;
 const char DATA_CHUNK_ID[] = "data";
 const int WORD_ALIGNMENT = 2;
+const int WAIT_INTERVAL_US = 100000; // 100ms in microseconds
+const int MAX_WAIT_COUNT = 500; // Maximum wait iterations (50 seconds total)
 
 // Multi-thread shared lock
 std::mutex g_threadLock;
@@ -1286,6 +1288,7 @@ OH_AudioData_Callback_Result MultiPlayAudioRendererOnWriteData(OH_AudioRenderer 
     bool recordFlag = g_threadPipelineManager->recordFlag;
     size_t &firstBufferSize = g_threadPipelineManager->firstBufferSize;
     OH_AudioRenderer *&audioRenderer = g_threadPipelineManager->audioRenderer;
+    OH_AudioSuitePipeline *audioSuitePipeline = g_threadPipelineManager->audioSuitePipeline;
     int32_t writeSize = 0;
     if (!finishedFlag) {
         MultiOneRenDerFrame(audioDataSize, &writeSize);
@@ -1293,9 +1296,16 @@ OH_AudioData_Callback_Result MultiPlayAudioRendererOnWriteData(OH_AudioRenderer 
             recordFlag ? "true" : "false");
         if (audioDataSize != 0 && recordFlag == true) {
             int32_t copySize = std::min(audioDataSize, writeSize);
-            std::copy(playAudioBuffer, playAudioBuffer + copySize,
-                static_cast<char *>(firstAudioBuffer) + firstBufferSize);
-            firstBufferSize += writeSize;
+            // Check buffer overflow before copying
+            if (firstBufferSize + copySize > MAX_BUFFER_SIZE) {
+                OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, MULTI_PIPELINE_TAG,
+                             "Buffer overflow prevented: firstBufferSize=%{public}zu, copySize=%{public}d, MAX=%{public}d",
+                             firstBufferSize, copySize, MAX_BUFFER_SIZE);
+            } else {
+                std::copy(playAudioBuffer, playAudioBuffer + copySize,
+                          static_cast<char *>(firstAudioBuffer) + firstBufferSize);
+                firstBufferSize += writeSize;
+            }
         }
     }
     // Copy rendered audio to output
@@ -1306,8 +1316,8 @@ OH_AudioData_Callback_Result MultiPlayAudioRendererOnWriteData(OH_AudioRenderer 
     if (finishedFlag) {
         // Stop playing
         OH_AudioRenderer_Stop(audioRenderer);
-        // Stop pipeline
-        OH_AudioSuiteEngine_StopPipeline(g_audioSuitePipeline);
+        // Stop pipeline using thread-safe pipeline reference
+        OH_AudioSuiteEngine_StopPipeline(audioSuitePipeline);
         ResetAllIsResetTotalWriteAudioDataSize();
         OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, MULTI_PIPELINE_TAG, "audioEditTest "
             "playAudioRendererOnWriteData firstBufferSize is %{public}zu", firstBufferSize);
@@ -1391,10 +1401,9 @@ napi_value MultiRealTimeSaveFileBuffer(napi_env env, napi_callback_info info)
     
     // Wait for rendering to complete
     bool &renderFinishedFlag = g_threadPipelineManager->renderFrameFinishFlag;
-    int maxWaitCount = 500; // Wait up to 50 seconds (100ms * 500)
     int waitCount = 0;
-    while (!renderFinishedFlag && waitCount < maxWaitCount) {
-        usleep(100000); // Sleep for 100ms
+    while (!renderFinishedFlag && waitCount < MAX_WAIT_COUNT) {
+        usleep(WAIT_INTERVAL_US);
         waitCount++;
     }
     
