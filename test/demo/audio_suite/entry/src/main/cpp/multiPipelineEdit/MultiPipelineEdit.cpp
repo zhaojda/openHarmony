@@ -409,8 +409,7 @@ OH_AudioSuite_Result GetRenderFrameOutputAsync(char *&firData, size_t frameSize,
     param->finishedFlag = finishedFlag;
     param->firstAudioBuffer = &g_threadPipelineManager->firstAudioBuffer;
     RenderFrameAsync(param);
-    delete param;
-    param = nullptr;
+    // Do not delete param here - RenderFrameAsync deletes it when finished to avoid double-delete
     OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, MULTI_PIPELINE_TAG,
                  "RenderFrameAsync done, pipeline:%{public}s", g_threadPipelineManager->pipelineId.c_str());
     return OH_AudioSuite_Result::AUDIOSUITE_SUCCESS;
@@ -1215,12 +1214,32 @@ OH_AudioSuite_Result MultiProcessPipeline(OH_AudioSuitePipeline *audioSuitePipel
     return result;
 }
 
+void ResetThreadPlaybackBuffers()
+{
+    if (g_threadPipelineManager == nullptr) {
+        return;
+    }
+    // Reset playback buffers to avoid stale data and leaks
+    if (g_threadPipelineManager->playAudioBuffer != nullptr) {
+        free(g_threadPipelineManager->playAudioBuffer);
+        g_threadPipelineManager->playAudioBuffer = nullptr;
+    }
+    g_threadPipelineManager->playAudioBufferSize = 0;
+    
+    if (g_threadPipelineManager->firstAudioBuffer != nullptr) {
+        free(g_threadPipelineManager->firstAudioBuffer);
+        g_threadPipelineManager->firstAudioBuffer = nullptr;
+    }
+    g_threadPipelineManager->firstBufferSize = 0;
+}
+
 OH_AudioSuite_Result MultiOneRenDerFrame(int32_t audioDataSize, int32_t *writeSize)
 {
     OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, MULTI_PIPELINE_TAG, "audioEditTest OneRenDerFrame start");
     OH_AudioSuitePipeline *audioSuitePipeline = g_threadPipelineManager->audioSuitePipeline;
     bool &finishedFlag = g_threadPipelineManager->renderFrameFinishFlag;
-    char *playAudioBuffer = g_threadPipelineManager->playAudioBuffer;
+    char *&playAudioBuffer = g_threadPipelineManager->playAudioBuffer;
+    size_t &playAudioBufferSize = g_threadPipelineManager->playAudioBufferSize;
     MultiProcessPipeline(audioSuitePipeline);
     if (audioDataSize <= CONSTANT_0) {
         OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, MULTI_PIPELINE_TAG,
@@ -1234,7 +1253,7 @@ OH_AudioSuite_Result MultiOneRenDerFrame(int32_t audioDataSize, int32_t *writeSi
         return OH_AudioSuite_Result::AUDIOSUITE_ERROR_SYSTEM;
     }
     OH_AudioSuite_Result result =
-        OH_AudioSuiteEngine_RenderFrame(g_audioSuitePipeline, audioData, audioDataSize, writeSize, &finishedFlag);
+        OH_AudioSuiteEngine_RenderFrame(audioSuitePipeline, audioData, audioDataSize, writeSize, &finishedFlag);
     OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, MULTI_PIPELINE_TAG,
                  "audioEditTest OH_AudioSuiteEngine_RenderFrame audioDataSize: %{public}d,writeSize:%{public}d "
                  "g_play_finishedFlag : %{public}s, result: %{public}d",
@@ -1243,8 +1262,21 @@ OH_AudioSuite_Result MultiOneRenDerFrame(int32_t audioDataSize, int32_t *writeSi
         OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, MULTI_PIPELINE_TAG,
                      "audioEditTest OH_audioSuiteEngine_RenderFrame result is %{public}d", static_cast<int>(result));
     }
-    playAudioBuffer = (char *)malloc(*writeSize);
-    std::copy(audioData, audioData + *writeSize, playAudioBuffer);
+    // Protect against writeSize <= 0 and manage playAudioBuffer properly
+    if (*writeSize > 0) {
+        // Free old buffer before allocating new one
+        if (playAudioBuffer != nullptr) {
+            free(playAudioBuffer);
+            playAudioBuffer = nullptr;
+        }
+        playAudioBuffer = (char *)malloc(*writeSize);
+        if (playAudioBuffer != nullptr) {
+            std::copy(audioData, audioData + *writeSize, playAudioBuffer);
+            playAudioBufferSize = *writeSize;
+        } else {
+            playAudioBufferSize = 0;
+        }
+    }
     OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, MULTI_PIPELINE_TAG,
                  "audioEditTest OH_AudioSuiteEngine_RenderFrame writeSize: %{public}d, g_play_finishedFlag: %{public}s",
                  *writeSize, (finishedFlag ? "true" : "false"));
@@ -1266,30 +1298,40 @@ OH_AudioData_Callback_Result MultiPlayAudioRendererOnWriteData(OH_AudioRenderer 
     bool &finishedFlag = g_threadPipelineManager->renderFrameFinishFlag;
     char *firstAudioBuffer = g_threadPipelineManager->firstAudioBuffer;
     char *&playAudioBuffer = g_threadPipelineManager->playAudioBuffer;
+    size_t &playAudioBufferSize = g_threadPipelineManager->playAudioBufferSize;
     bool recordFlag = g_threadPipelineManager->recordFlag;
     size_t &firstBufferSize = g_threadPipelineManager->firstBufferSize;
     OH_AudioRenderer *&audioRenderer = g_threadPipelineManager->audioRenderer;
+    OH_AudioSuitePipeline *audioSuitePipeline = g_threadPipelineManager->audioSuitePipeline;
     int32_t writeSize = 0;
     if (!finishedFlag) {
         MultiOneRenDerFrame(audioDataSize, &writeSize);
         OH_LOG_Print(LOG_APP, LOG_WARN, GLOBAL_RESMGR, MULTI_PIPELINE_TAG, "g_isRecord: %{public}s",
             recordFlag ? "true" : "false");
-        if (audioDataSize != 0 && recordFlag == true) {
+        // Output audio data from playAudioBuffer and protect against null pointers and writeSize <= 0
+        if (recordFlag == true && writeSize > 0 && playAudioBuffer != nullptr) {
             int32_t copySize = std::min(audioDataSize, writeSize);
             std::copy(playAudioBuffer, playAudioBuffer + copySize,
                 static_cast<char *>(firstAudioBuffer) + firstBufferSize);
-            firstBufferSize += writeSize;
+            firstBufferSize += copySize;
         }
     }
-    int32_t copySize = std::min(audioDataSize, writeSize);
-    if (firstAudioBuffer != nullptr && copySize > 0) {
+    // Output audio data from playAudioBuffer to callback and protect against writeSize <= 0 and null pointers
+    int32_t copySize = 0;
+    if (playAudioBuffer != nullptr && playAudioBufferSize > 0) {
+        copySize = std::min(audioDataSize, static_cast<int32_t>(playAudioBufferSize));
+        std::copy(playAudioBuffer, playAudioBuffer + copySize, static_cast<char *>(audioData));
+    } else if (firstAudioBuffer != nullptr && writeSize > 0) {
+        copySize = std::min(audioDataSize, writeSize);
         std::copy(firstAudioBuffer, firstAudioBuffer + copySize, static_cast<char *>(audioData));
     }
     if (finishedFlag) {
         // Stop playing
         OH_AudioRenderer_Stop(audioRenderer);
-        // Stop pipeline
-        OH_AudioSuiteEngine_StopPipeline(g_audioSuitePipeline);
+        // Stop pipeline using thread-local pipeline
+        OH_AudioSuiteEngine_StopPipeline(audioSuitePipeline);
+        // Reset playback buffers after stop to avoid stale data and leaks
+        ResetThreadPlaybackBuffers();
         ResetAllIsResetTotalWriteAudioDataSize();
         OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, MULTI_PIPELINE_TAG, "audioEditTest "
             "playAudioRendererOnWriteData firstBufferSize is %{public}zu", firstBufferSize);
