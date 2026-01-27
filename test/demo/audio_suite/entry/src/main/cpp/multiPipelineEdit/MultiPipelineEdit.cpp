@@ -1304,7 +1304,7 @@ OH_AudioData_Callback_Result MultiPlayAudioRendererOnWriteData(OH_AudioRenderer 
             } else {
                 std::copy(playAudioBuffer, playAudioBuffer + copySize,
                           static_cast<char *>(firstAudioBuffer) + firstBufferSize);
-                firstBufferSize += writeSize;
+                firstBufferSize += copySize;
             }
         }
     }
