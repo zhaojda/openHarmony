@@ -304,6 +304,11 @@ export struct AutoTest {
         let fileData: string = buffer.from(buf).toString();
         let obj = JSON.parse(fileData);
         jsonFileInfo.summary = Object(obj)["summary"];
+        // Parse realTime field from JSON, default to false if not present
+        if (Object(obj)["realTime"] !== undefined) {
+          jsonFileInfo.realTime = Boolean(Object(obj)["realTime"]);
+          Logger.info(TAG, `JSON file ${jsonFile} realTime: ${jsonFileInfo.realTime}`);
+        }
         this.selectOptionList.push({ value: jsonFileInfo.summary });
         jsonSummaryToJsonFileInfoMap.set(jsonFileInfo.summary, jsonFileInfo);
         if (Object(obj)["scenes"] == undefined || !Array.isArray(Object(obj)["scenes"])) {

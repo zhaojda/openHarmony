@@ -43,6 +43,11 @@ export async function multiPipelineRealTimeSaveFileBuffer(pipelineId: string, ou
   Logger.info(TAG, `multiPipelineRealTimeSaveFileBuffer start---pipelineId:${pipelineId}, multiRenderFlag:${multiRenderFlag}`)
   audioNapi.multiPipelineEnvPrepare(pipelineId);
   audioNapi.multiSetFormat(outputInfo?.channels, outputInfo?.sampleRate, outputInfo?.bitDepth);
+  // Initialize audio renderer for real-time playback
+  audioNapi.multiAudioRendererInit();
+  // Start real-time rendering
+  audioNapi.multiAudioRendererStart();
+  // Get the rendered audio buffer (this will wait for rendering to complete)
   let pcmBuffer = audioNapi.multiRealTimeSaveFileBuffer();
   return [pcmBuffer as ArrayBuffer];
 }
