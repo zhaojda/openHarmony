@@ -1435,7 +1435,6 @@ napi_value MultiRealTimeSaveFileBuffer(napi_env env, napi_callback_info info)
         return napiValue;
     }
 }
-}
 
 napi_value GetAutoTestProcess(napi_env env, napi_callback_info info)
 {
