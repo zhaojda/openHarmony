@@ -1317,11 +1317,14 @@ OH_AudioData_Callback_Result MultiPlayAudioRendererOnWriteData(OH_AudioRenderer 
         }
     }
     // Output audio data from playAudioBuffer to callback and protect against writeSize <= 0 and null pointers
+    // Priority: use playAudioBuffer (from latest render) if available, otherwise fall back to firstAudioBuffer
     int32_t copySize = 0;
     if (playAudioBuffer != nullptr && playAudioBufferSize > 0) {
+        // Use playAudioBuffer which contains the most recent rendered audio frame
         copySize = std::min(audioDataSize, static_cast<int32_t>(playAudioBufferSize));
         std::copy(playAudioBuffer, playAudioBuffer + copySize, static_cast<char *>(audioData));
     } else if (firstAudioBuffer != nullptr && writeSize > 0) {
+        // Fall back to firstAudioBuffer if playAudioBuffer is not available
         copySize = std::min(audioDataSize, writeSize);
         std::copy(firstAudioBuffer, firstAudioBuffer + copySize, static_cast<char *>(audioData));
     }
