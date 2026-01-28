@@ -422,6 +422,10 @@ void AudioDeviceCommon::UpdateConnectedDevicesWhenDisconnecting(const AudioDevic
         updatedDesc.macAddress_, updatedDesc.deviceRole_, descForCb);
     ClearPreferredDevices(descForCb);
 
+    std::vector<shared_ptr<AudioDeviceDescriptor>> unexcludedDevice = {
+        make_shared<AudioDeviceDescriptor>(updatedDesc)};
+    AudioPolicyUtils::GetInstance().UnexcludeOutputDevices(D_ALL_DEVICES, unexcludedDevice);
+
     audioConnectedDevice_.DelConnectedDevice(updatedDesc.networkId_, updatedDesc.deviceType_,
         updatedDesc.macAddress_, updatedDesc.deviceRole_);
 
@@ -473,9 +477,6 @@ void AudioDeviceCommon::UpdateConnectedDevicesWhenConnectingForOutputDevice(
     AudioPolicyUtils::GetInstance().UpdateDisplayName(audioDescriptor);
     AudioAdapterManager::GetInstance().QueryDeviceVolumeBehavior(audioDescriptor);
     audioConnectedDevice_.AddConnectedDevice(audioDescriptor);
-    std::vector<shared_ptr<AudioDeviceDescriptor>> unexcludedDevice = {
-        make_shared<AudioDeviceDescriptor>(updatedDesc)};
-    AudioPolicyUtils::GetInstance().UnexcludeOutputDevices(D_ALL_DEVICES, unexcludedDevice);
     audioDeviceManager_.AddNewDevice(audioDescriptor);
     AudioAdapterManager::GetInstance().UpdateVolumeWhenDeviceConnect(audioDescriptor);
     if (updatedDesc.connectState_ == VIRTUAL_CONNECTED) {

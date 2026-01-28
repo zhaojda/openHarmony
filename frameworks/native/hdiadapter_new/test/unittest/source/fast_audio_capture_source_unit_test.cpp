@@ -19,7 +19,6 @@
 #include "audio_utils.h"
 #include "common/hdi_adapter_info.h"
 #include "manager/hdi_adapter_manager.h"
-#include "fast_audio_capture_source.h"
 
 using namespace testing::ext;
 
@@ -247,15 +246,15 @@ HWTEST_F(FastAudioCaptureSourceUnitTest, FastVoipSourceUnitTest_004, TestSize.Le
  * @tc.number : EnableSyncInfo_001
  * @tc.desc   : Test EnableSyncInfo()
  */
-HWTEST_F(FastAudioCaptureSourceUnitTest, EnableSyncInfo_001, TestSize.Level1)
+HWTEST_F(FastAudioCaptureSourceUnitTest, EnableSyncInfo_001, TestSize.Level2)
 {
-    auto FastSource = std::make_shared<FastAudioCaptureSource>();
+    auto testSource = std::make_shared<FastAudioCaptureSource>();
 
-    FastSource->EnableSyncInfo(0);
-    EXPECT_EQ(FastSource->syncInfoSize_, 0);
+    testSource->EnableSyncInfo(0);
+    EXPECT_EQ(testSource->syncInfoSize_, 0);
 
-    FastSource->EnableSyncInfo(1);
-    EXPECT_EQ(FastSource->syncInfoSize_, 1);
+    testSource->EnableSyncInfo(1);
+    EXPECT_EQ(testSource->syncInfoSize_, 1);
 }
 
 } // namespace AudioStandard

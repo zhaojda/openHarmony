@@ -98,7 +98,7 @@ struct BasicBufferInfo {
     std::atomic<uint64_t> timeStamp;
 
     std::atomic<float> streamVolume;
-
+     
     std::atomic<uint32_t> beginDurationMs;
     std::atomic<uint32_t> durationMs;
     std::atomic<float> duckFactor;
@@ -169,6 +169,7 @@ public:
     static std::shared_ptr<OHAudioBufferBase> CreateFromRemote(uint32_t totalSizeInFrame,
         uint32_t byteSizePerFrame, AudioBufferHolder holder, int dataFd, int infoFd = INVALID_BUFFER_FD);
 
+    // idl
     bool Marshalling(Parcel &parcel) const override;
     static OHAudioBufferBase *Unmarshalling(Parcel &parcel);
 
@@ -306,11 +307,11 @@ private:
     AudioMode audioMode_;
 
      // for StatusInfo buffer
-    std::shared_ptr<AudioSharedMemory> statusInfoMem_ = nullptr;
+    mutable std::shared_ptr<AudioSharedMemory> statusInfoMem_ = nullptr;
     BasicBufferInfo *basicBufferInfo_ = nullptr;
 
     // for audio data buffer
-    std::shared_ptr<AudioSharedMemory> dataMem_ = nullptr;
+    mutable std::shared_ptr<AudioSharedMemory> dataMem_ = nullptr;
     uint8_t *dataBase_ = nullptr;
     volatile uint32_t *syncReadFrame_ = nullptr;
     volatile uint32_t *syncWriteFrame_ = nullptr;
@@ -429,7 +430,6 @@ private:
 
     SpanInfo *spanInfoList_ = nullptr;
 };
-
 } // namespace AudioStandard
 } // namespace OHOS
 #endif // OH_AUDIO_BUFFER_H

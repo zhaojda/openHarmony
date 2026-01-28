@@ -37,11 +37,7 @@ export default class EntryAbility extends UIAbility {
     }).catch((err: BusinessError) => {
     
     });
-    atManager.requestPermissionsFromUser(this.context, ['ohos.permission.MICROPHONE']).then((data) => {
-
-    }).catch((err: BusinessError) => {
-
-    });
+    
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {
         hilog.error(DOMAIN, 'testTag', 'Failed to load the content. Cause: %{public}s', JSON.stringify(err));

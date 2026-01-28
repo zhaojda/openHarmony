@@ -8,8 +8,8 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "ohaudiosuite/native_audio_suite_base.h"
-#include "ohaudiosuite/native_audio_suite_engine.h"
+#include "ohaudio/native_audio_suite_base.h"
+#include "ohaudio/native_audio_suite_engine.h"
 
 enum NodeType { INPUT_NODE, OUTPUT_NODE, NOISE_REDUCTION_NODE, AUDIO_SEPARATION_NODE, SOUND_FIELD_NODE, MIXER_NODE };
 
@@ -74,7 +74,7 @@ public:
     // Stop pipeline status
     OH_AudioSuite_Result stopPipelineState();
 
-    bool IsValidNode(const std::string &nodeId) const;
+    bool IsValidNode(const std::string &nodeId);
 
     OH_AudioSuite_Result insertBefore(
         const std::string &sourceNodeId, const std::string &targetNodeId, const Node &targetNode);

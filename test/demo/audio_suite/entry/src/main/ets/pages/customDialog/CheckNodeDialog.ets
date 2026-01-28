@@ -25,7 +25,7 @@ import {
     SpaceRenderModeMap,
     ClockWiseMap,
     SpacePosition
-} from "../../utils/InterfaceInfo";
+} from "../../utils/importSongs/InterfaceInfo";
 import { JSON, util } from '@kit.ArkTS';
 import { Logger } from '../../utils/Logger';
 import { SpaceRenderPositionView } from '../common/SpaceRender';
@@ -112,6 +112,7 @@ struct FieldComponent {
                     Radio({ value: 'close', group: 'fieldEffect' })
                         .checked(this.selectedSoundFiled === SoundFiledType.SOUND_FIELD_CLOSE)
                         .onChange(() => {
+                            // tongjian OH_AudioSuite_Result OH_AudioSuiteEngine_BypassEffectNode(OH_AudioNode* audioNode, bool bypass);
                             this.selectedSoundFiled = SoundFiledType.SOUND_FIELD_CLOSE;
                         })
                     Text('无').fontSize(20)
@@ -1647,7 +1648,7 @@ struct EffectNodeDialog {
                             id: nodeId,
                             type: this.selectedEffectNode,
                             color: ColorMap.get(this.selectedEffectNode),
-                            environmentType: this.selectedEnvironment
+                            generalVoiceChangeType: this.generalVoiceChangeType
                         }
                         this.isLeft ? this.addEffectNodeToInputList(node) : this.addEffectNodeToMixerList(node);
 
@@ -1676,7 +1677,9 @@ struct EffectNodeDialog {
                             id: nodeId,
                             type: this.selectedEffectNode,
                             color: ColorMap.get(this.selectedEffectNode),
-                            environmentType: this.selectedEnvironment
+                            pureVoiceChangeGender : this.pureVoiceGender,
+                            pureVoiceChangeType : this.pureVoiceChangeType,
+                            pureVoiceChangePitch : this.pureVoiceSoundTone,
                         }
                         this.isLeft ? this.addEffectNodeToInputList(node) : this.addEffectNodeToMixerList(node);
 
