@@ -1,5 +1,39 @@
 /*
  * Copyright (c) 2025 Huawei Device Co., Ltd. 2025-2025. All rights reserved.
+ * 
+ * AutoTest Module - Real-Time Playback Automation Testing
+ * 
+ * This module provides automated testing for audio processing pipelines with support
+ * for both standard and real-time playback modes.
+ * 
+ * JSON Test Case Format:
+ * {
+ *   "summary": "Test Case Name",
+ *   "realTime": true,  // or "real_time": true - Enable real-time playback mode
+ *   "scenes": [
+ *     {
+ *       "scene_name": "Scene 1",
+ *       "description": "Test description",
+ *       "input_files": [...],
+ *       "mixer_info": [...],
+ *       "output_file": {...},
+ *       "expected_output": {
+ *         "md5Value": ["expected_md5_hash"]
+ *       }
+ *     }
+ *   ]
+ * }
+ * 
+ * Real-Time Playback Flow:
+ * 1. Parse JSON test case and detect realTime flag
+ * 2. Initialize audio pipeline (initAllPipeline)
+ * 3. Initialize input nodes (initAllInputNode)
+ * 4. Initialize effect nodes (initAllEffectNode)
+ * 5. Execute real-time rendering with multiPipelineRealTimeSaveFileBuffer
+ * 6. Monitor progress via getAutoTestProcess
+ * 7. Save output files and verify MD5
+ * 8. Generate test report
+ * 9. Clean up resources
  */
 import { Decimal } from '@kit.ArkTS';
 import { media } from '@kit.MediaKit';
