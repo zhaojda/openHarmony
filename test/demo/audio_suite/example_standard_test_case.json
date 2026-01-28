@@ -1,0 +1,31 @@
+{
+  "summary": "标准渲染测试用例示例",
+  "realTime": false,
+  "scenes": [
+    {
+      "scene_name": "基础标准渲染测试",
+      "description": "测试标准音频渲染功能（非实时模式）",
+      "input_files": [
+        {
+          "path": "test_audio_48k_stereo.wav",
+          "sample_rate": 48000,
+          "bit_depth": 32,
+          "channels": 2,
+          "format": "wav",
+          "effect": []
+        }
+      ],
+      "mixer_info": [],
+      "output_file": {
+        "name_template": "standard_output",
+        "format": "wav",
+        "sample_rate": 48000,
+        "bit_depth": 32,
+        "channels": 2
+      },
+      "expected_output": {
+        "md5Value": ["example_md5_hash_value"]
+      }
+    }
+  ]
+}
