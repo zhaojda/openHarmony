@@ -1,0 +1,71 @@
+{
+  "summary": "实时播放测试用例示例",
+  "realTime": true,
+  "scenes": [
+    {
+      "scene_name": "基础实时播放测试",
+      "description": "测试基本的实时音频播放和渲染功能",
+      "input_files": [
+        {
+          "path": "test_audio_48k_stereo.wav",
+          "sample_rate": 48000,
+          "bit_depth": 32,
+          "channels": 2,
+          "format": "wav",
+          "effect": [
+            {
+              "type": "NR",
+              "gains": []
+            }
+          ]
+        }
+      ],
+      "mixer_info": [],
+      "output_file": {
+        "name_template": "realtime_output",
+        "format": "wav",
+        "sample_rate": 48000,
+        "bit_depth": 32,
+        "channels": 2
+      },
+      "expected_output": {
+        "md5Value": []
+      }
+    },
+    {
+      "scene_name": "实时播放与音效测试",
+      "description": "测试实时播放模式下的音效处理",
+      "input_files": [
+        {
+          "path": "test_audio_48k_stereo.wav",
+          "sample_rate": 48000,
+          "bit_depth": 32,
+          "channels": 2,
+          "format": "wav",
+          "effect": [
+            {
+              "type": "NR",
+              "gains": []
+            },
+            {
+              "type": "EQ",
+              "mode": 1,
+              "gains": []
+            }
+          ]
+        }
+      ],
+      "mixer_info": [],
+      "output_file": {
+        "name_template": "realtime_output_with_effects",
+        "format": "wav",
+        "sample_rate": 48000,
+        "bit_depth": 32,
+        "channels": 2
+      },
+      "expected_output": {
+        "md5Value": []
+      }
+    }
+  ]
+}
