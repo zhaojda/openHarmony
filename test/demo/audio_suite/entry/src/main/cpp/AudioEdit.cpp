@@ -875,13 +875,16 @@ static napi_value SetIsRecord(napi_env env, napi_callback_info info)
     napi_status status = napi_get_value_bool(env, argv[ARG_0], &isRecord);
     if (status != napi_ok) {
         OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG, "SetIsRecord status: %{public}d", static_cast<int>(status));
+        delete[] argv;
         return nullptr;
     }
     OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG,
         "SetIsRecord isRecord: %{public}s", isRecord ? "true" : "false");
+    g_isRecord = isRecord;
     if (isRecord) {
         g_playResultTotalSize = 0;
     }
+    delete[] argv;
     return nullptr;
 }
  
@@ -895,8 +898,351 @@ static napi_value SetSeparationMode(napi_env env, napi_callback_info info)
     napi_status status = napi_get_value_uint32(env, argv[0], &g_separationMode);
     OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG,
         "SetSeparationMode g_separationMode: %{public}d", g_separationMode);
-    
+    delete[] argv;
     return ReturnResult(env, static_cast<AudioSuiteResult>(status));
+}
+
+// Real-time playback NAPI methods for single-pipeline audio rendering
+// Call sequence: initAudioRenderer -> registerPlaybackFinishCallback -> setRecordFlag -> 
+// startAudioRenderer -> (wait for callback) -> getRecordedAudioData -> stopAudioRenderer -> releaseAudioRenderer
+
+// Initialize audio renderer with specific audio format
+// Preconditions: None (will release any existing renderer)
+// Side effects: Creates new audio renderer, sets g_playDataSize
+static napi_value InitAudioRenderer(napi_env env, napi_callback_info info)
+{
+    OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG, "audioEditTest InitAudioRenderer start");
+    size_t argc = 3;
+    napi_value *argv = new napi_value[argc];
+    napi_status napiStatus = napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+    
+    if (napiStatus != napi_ok || argc < 3) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, TAG,
+            "audioEditTest InitAudioRenderer: Invalid arguments, status=%{public}d", napiStatus);
+        delete[] argv;
+        napi_value result;
+        napi_create_int32(env, 1, &result); // FAILED
+        return result;
+    }
+
+    int32_t sampleRate, channels, bitDepth;
+    napiStatus = napi_get_value_int32(env, argv[0], &sampleRate);
+    if (napiStatus != napi_ok) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, TAG,
+            "audioEditTest InitAudioRenderer: Failed to get sampleRate, status=%{public}d", napiStatus);
+        delete[] argv;
+        napi_value result;
+        napi_create_int32(env, 1, &result); // FAILED
+        return result;
+    }
+    
+    napiStatus = napi_get_value_int32(env, argv[1], &channels);
+    if (napiStatus != napi_ok) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, TAG,
+            "audioEditTest InitAudioRenderer: Failed to get channels, status=%{public}d", napiStatus);
+        delete[] argv;
+        napi_value result;
+        napi_create_int32(env, 1, &result); // FAILED
+        return result;
+    }
+    
+    napiStatus = napi_get_value_int32(env, argv[2], &bitDepth);
+    if (napiStatus != napi_ok) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, TAG,
+            "audioEditTest InitAudioRenderer: Failed to get bitDepth, status=%{public}d", napiStatus);
+        delete[] argv;
+        napi_value result;
+        napi_create_int32(env, 1, &result); // FAILED
+        return result;
+    }
+
+    OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG,
+        "audioEditTest InitAudioRenderer: sampleRate=%{public}d, channels=%{public}d, bitDepth=%{public}d",
+        sampleRate, channels, bitDepth);
+
+    delete[] argv;
+
+    // Release any existing resources
+    ReleaseExistingResources();
+
+    // Create audio stream builder
+    OH_AudioStream_Type type = OH_AudioStream_Type::AUDIOSTREAM_TYPE_RENDERER;
+    OH_AudioStream_Result builderResult = OH_AudioStreamBuilder_Create(&rendererBuilder, type);
+    if (builderResult != AUDIOSTREAM_SUCCESS) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, TAG,
+            "audioEditTest InitAudioRenderer: Failed to create builder, result=%{public}d", builderResult);
+        napi_value result;
+        napi_create_int32(env, 1, &result); // FAILED
+        return result;
+    }
+
+    // Convert bit depth to stream format
+    OH_AudioStream_SampleFormat streamSampleFormat;
+    if (bitDepth == 16) {
+        streamSampleFormat = AUDIOSTREAM_SAMPLE_S16LE;
+    } else if (bitDepth == 24) {
+        streamSampleFormat = AUDIOSTREAM_SAMPLE_S24LE;
+    } else if (bitDepth == 32) {
+        streamSampleFormat = AUDIOSTREAM_SAMPLE_S32LE;
+    } else {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, TAG,
+            "audioEditTest InitAudioRenderer: Unsupported bit depth %{public}d", bitDepth);
+        OH_AudioStreamBuilder_Destroy(rendererBuilder);
+        rendererBuilder = nullptr;
+        napi_value result;
+        napi_create_int32(env, 1, &result); // FAILED
+        return result;
+    }
+
+    // Set audio renderer parameters
+    OH_AudioStreamBuilder_SetSamplingRate(rendererBuilder, sampleRate);
+    OH_AudioStreamBuilder_SetChannelCount(rendererBuilder, channels);
+    OH_AudioStreamBuilder_SetSampleFormat(rendererBuilder, streamSampleFormat);
+    OH_AudioStreamBuilder_SetEncodingType(rendererBuilder, AUDIOSTREAM_ENCODING_TYPE_RAW);
+    OH_AudioStreamBuilder_SetRendererInfo(rendererBuilder, AUDIOSTREAM_USAGE_MUSIC);
+
+    // Calculate frame size for callback
+    g_playDataSize = SAMPLINGRATE_MULTI * sampleRate * channels * bitDepth / 
+                     BITSPERSAMPLE_MULTI / CHANNELCOUNT_MULTI;
+    OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG,
+        "audioEditTest InitAudioRenderer: g_playDataSize=%{public}d", g_playDataSize);
+    OH_AudioStreamBuilder_SetFrameSizeInCallback(rendererBuilder, g_playDataSize);
+
+    // Set write data callback
+    OH_AudioRenderer_OnWriteDataCallback rendererCallbacks = PlayAudioRendererOnWriteData;
+    OH_AudioStreamBuilder_SetRendererWriteDataCallback(rendererBuilder, rendererCallbacks, nullptr);
+
+    // Generate the audio renderer
+    OH_AudioStream_Result genResult = OH_AudioStreamBuilder_GenerateRenderer(rendererBuilder, &audioRenderer);
+    if (genResult != AUDIOSTREAM_SUCCESS || audioRenderer == nullptr) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, TAG,
+            "audioEditTest InitAudioRenderer: Failed to generate renderer, result=%{public}d", genResult);
+        OH_AudioStreamBuilder_Destroy(rendererBuilder);
+        rendererBuilder = nullptr;
+        napi_value result;
+        napi_create_int32(env, 1, &result); // FAILED
+        return result;
+    }
+
+    OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG, "audioEditTest InitAudioRenderer: Success");
+    napi_value result;
+    napi_create_int32(env, 0, &result); // SUCCESS
+    return result;
+}
+
+// Start audio renderer (triggers callback loop)
+// Preconditions: audioRenderer must be initialized
+// Side effects: Starts pipeline, allocates g_playTotalAudioData if recording enabled
+static napi_value StartAudioRenderer(napi_env env, napi_callback_info info)
+{
+    OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG, "audioEditTest StartAudioRenderer start");
+    
+    if (audioRenderer == nullptr) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, TAG,
+            "audioEditTest StartAudioRenderer: audioRenderer is nullptr");
+        napi_value result;
+        napi_create_int32(env, 1, &result); // FAILED
+        return result;
+    }
+
+    // Start the pipeline first
+    ProcessPipeline();
+
+    // Allocate buffer for recording if needed
+    if (g_isRecord) {
+        if (g_playTotalAudioData == nullptr) {
+            g_playTotalAudioData = (char *)malloc(MAX_PLAY_RESULT_BUFFER_SIZE);
+            if (g_playTotalAudioData == nullptr) {
+                OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, TAG,
+                    "audioEditTest StartAudioRenderer: Failed to allocate g_playTotalAudioData");
+                napi_value result;
+                napi_create_int32(env, 1, &result); // FAILED
+                return result;
+            }
+        }
+        g_playResultTotalSize = 0;
+    }
+
+    // Start the audio renderer (this triggers the callback loop)
+    OH_AudioStream_Result startResult = OH_AudioRenderer_Start(audioRenderer);
+    if (startResult != AUDIOSTREAM_SUCCESS) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, TAG,
+            "audioEditTest StartAudioRenderer: Failed to start renderer, result=%{public}d", startResult);
+        napi_value result;
+        napi_create_int32(env, 1, &result); // FAILED
+        return result;
+    }
+
+    OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG, "audioEditTest StartAudioRenderer: Success");
+    napi_value result;
+    napi_create_int32(env, 0, &result); // SUCCESS
+    return result;
+}
+
+// Stop audio renderer
+// Preconditions: None (idempotent)
+// Side effects: Stops renderer and pipeline
+static napi_value StopAudioRenderer(napi_env env, napi_callback_info info)
+{
+    OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG, "audioEditTest StopAudioRenderer start");
+    
+    OH_AudioStream_Result stopResult = AUDIOSTREAM_SUCCESS;
+    if (audioRenderer != nullptr) {
+        stopResult = OH_AudioRenderer_Stop(audioRenderer);
+        if (stopResult != AUDIOSTREAM_SUCCESS) {
+            OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, TAG,
+                "audioEditTest StopAudioRenderer: Failed to stop renderer, result=%{public}d", stopResult);
+        } else {
+            OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG, "audioEditTest StopAudioRenderer: Success");
+        }
+    } else {
+        OH_LOG_Print(LOG_APP, LOG_WARN, GLOBAL_RESMGR, TAG,
+            "audioEditTest StopAudioRenderer: audioRenderer is nullptr");
+    }
+
+    // Stop the pipeline
+    if (g_audioSuitePipeline != nullptr) {
+        OH_AudioSuiteEngine_StopPipeline(g_audioSuitePipeline);
+    }
+
+    napi_value result;
+    napi_create_int32(env, (stopResult == AUDIOSTREAM_SUCCESS) ? 0 : 1, &result);
+    return result;
+}
+
+// Release audio renderer resources
+static napi_value ReleaseAudioRenderer(napi_env env, napi_callback_info info)
+{
+    OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG, "audioEditTest ReleaseAudioRenderer start");
+    
+    ReleaseExistingResources();
+    
+    OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG, "audioEditTest ReleaseAudioRenderer: Success");
+    return nullptr;
+}
+
+// Set record flag to enable/disable recording of output
+static napi_value SetRecordFlag(napi_env env, napi_callback_info info)
+{
+    OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG, "audioEditTest SetRecordFlag start");
+    size_t argc = 1;
+    napi_value *argv = new napi_value[argc];
+    napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+
+    bool enable;
+    napi_status status = napi_get_value_bool(env, argv[0], &enable);
+    if (status != napi_ok) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, TAG,
+            "audioEditTest SetRecordFlag: Failed to get bool value, status=%{public}d", status);
+        delete[] argv;
+        return nullptr;
+    }
+
+    g_isRecord = enable;
+    OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG,
+        "audioEditTest SetRecordFlag: g_isRecord=%{public}s", g_isRecord ? "true" : "false");
+
+    delete[] argv;
+    return nullptr;
+}
+
+// Get recorded audio data
+static napi_value GetRecordedAudioData(napi_env env, napi_callback_info info)
+{
+    OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG,
+        "audioEditTest GetRecordedAudioData: g_playResultTotalSize=%{public}d", g_playResultTotalSize);
+
+    if (g_playResultTotalSize == 0 || g_playTotalAudioData == nullptr) {
+        OH_LOG_Print(LOG_APP, LOG_WARN, GLOBAL_RESMGR, TAG,
+            "audioEditTest GetRecordedAudioData: No audio data recorded");
+        return nullptr;
+    }
+
+    // Create ArrayBuffer and copy data
+    napi_value arrayBuffer;
+    void *data;
+    napi_status status = napi_create_arraybuffer(env, g_playResultTotalSize, &data, &arrayBuffer);
+    if (status != napi_ok) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, TAG,
+            "audioEditTest GetRecordedAudioData: Failed to create ArrayBuffer, status=%{public}d", status);
+        return nullptr;
+    }
+
+    memcpy(data, g_playTotalAudioData, g_playResultTotalSize);
+    OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG,
+        "audioEditTest GetRecordedAudioData: Returned %{public}d bytes", g_playResultTotalSize);
+
+    return arrayBuffer;
+}
+
+// Register callback for playback finish notification
+// Preconditions: Stop any existing audio renderer before calling this
+// Side effects: Creates threadsafe function, replaces existing callback if any
+static napi_value RegisterPlaybackFinishCallback(napi_env env, napi_callback_info info)
+{
+    OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG, "audioEditTest RegisterPlaybackFinishCallback start");
+    
+    size_t argc = 1;
+    napi_value argv[1];
+    napi_status status = napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr);
+
+    if (status != napi_ok || argc < 1) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, TAG,
+            "audioEditTest RegisterPlaybackFinishCallback: Invalid arguments, status=%{public}d", status);
+        return nullptr;
+    }
+
+    // Clean up existing threadsafe function if any
+    // Note: This should be called when audio renderer is stopped to avoid race conditions
+    if (tsfnBoolean != nullptr) {
+        napi_release_threadsafe_function(tsfnBoolean, napi_tsfn_release);
+        tsfnBoolean = nullptr;
+    }
+
+    // Create a name for the threadsafe function
+    napi_value resourceName;
+    napi_create_string_utf8(env, "PlaybackFinishCallback", NAPI_AUTO_LENGTH, &resourceName);
+
+    // Create the threadsafe function
+    status = napi_create_threadsafe_function(
+        env,
+        argv[0],                    // JS callback function
+        nullptr,                    // async resource
+        resourceName,               // resource name
+        0,                          // max queue size (0 = unlimited)
+        1,                          // initial thread count
+        nullptr,                    // thread finalize data
+        nullptr,                    // thread finalize callback
+        nullptr,                    // context
+        CallBoolThread,             // call JS callback
+        &tsfnBoolean                // result
+    );
+
+    if (status != napi_ok) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, GLOBAL_RESMGR, TAG,
+            "audioEditTest RegisterPlaybackFinishCallback: Failed to create threadsafe function, status=%{public}d",
+            status);
+        return nullptr;
+    }
+
+    OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG,
+        "audioEditTest RegisterPlaybackFinishCallback: Success");
+    return nullptr;
+}
+
+// Unregister playback finish callback
+static napi_value UnregisterPlaybackFinishCallback(napi_env env, napi_callback_info info)
+{
+    OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG, "audioEditTest UnregisterPlaybackFinishCallback start");
+    
+    if (tsfnBoolean != nullptr) {
+        napi_release_threadsafe_function(tsfnBoolean, napi_tsfn_release);
+        tsfnBoolean = nullptr;
+        OH_LOG_Print(LOG_APP, LOG_INFO, GLOBAL_RESMGR, TAG,
+            "audioEditTest UnregisterPlaybackFinishCallback: Success");
+    }
+
+    return nullptr;
 }
 
 static napi_value clear(napi_env env, napi_callback_info info)
@@ -1118,7 +1464,16 @@ const std::vector<napi_property_descriptor> otherDescriptors = {
     {"ModifyRender", nullptr, ModifyRender, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"stopPipeline", nullptr, stopPipeline, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"setCurrentTime", nullptr, setCurrentTime, nullptr, nullptr, nullptr, napi_default, nullptr},
-    {"setEffectNodeBypass", nullptr, SetEffectNodeBypass, nullptr, nullptr, nullptr, napi_default, nullptr}
+    {"setEffectNodeBypass", nullptr, SetEffectNodeBypass, nullptr, nullptr, nullptr, napi_default, nullptr},
+    // Real-time playback methods
+    {"initAudioRenderer", nullptr, InitAudioRenderer, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"startAudioRenderer", nullptr, StartAudioRenderer, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"stopAudioRenderer", nullptr, StopAudioRenderer, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"releaseAudioRenderer", nullptr, ReleaseAudioRenderer, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"setRecordFlag", nullptr, SetRecordFlag, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"getRecordedAudioData", nullptr, GetRecordedAudioData, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"registerPlaybackFinishCallback", nullptr, RegisterPlaybackFinishCallback, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"unregisterPlaybackFinishCallback", nullptr, UnregisterPlaybackFinishCallback, nullptr, nullptr, nullptr, napi_default, nullptr}
 };
 
 EXTERN_C_START static napi_value Init(napi_env env, napi_value exports)
