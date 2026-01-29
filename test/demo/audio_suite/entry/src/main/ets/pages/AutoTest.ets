@@ -61,16 +61,15 @@ interface AudioNapiInterface {
   stopAudioRenderer(): number;
   releaseAudioRenderer(): void;
   setRecordFlag(enable: boolean): void;
-  getRecordedAudioData(): ArrayBuffer;
+  getRecordedAudioData(): ArrayBuffer | null;
   registerPlaybackFinishCallback(callback: () => void): void;
   unregisterPlaybackFinishCallback(): void;
   
-  // Existing methods
+  // Existing methods (commonly used ones)
   multiPipelineEnvPrepare(pipelineId: string): void;
   multiSetFormat(channels: number, sampleRate: number, bitDepth: number): void;
   multiRealTimeSaveFileBuffer(): ArrayBuffer;
   getAutoTestProcess(): Record<string, number>;
-  [key: string]: Function | any;
 }
 
 // Cast audioNapi to the interface
@@ -988,6 +987,8 @@ export struct AutoTest {
 
     const outputInfo = sceneInfo.outputFile;
     const pipelineInfo = pipelineIdToPipelineInfoMap.get(pipelineId);
+    let rendererInitialized = false;
+    let rendererStarted = false;
     
     try {
       // 1. Initialize audio renderer
@@ -1005,6 +1006,7 @@ export struct AutoTest {
         return FAILED;
       }
 
+      rendererInitialized = true;
       this.audioRendererReady = true;
 
       // 2. Set playback finished callback
@@ -1027,10 +1029,12 @@ export struct AutoTest {
         return FAILED;
       }
 
+      rendererStarted = true;
+
       // 5. Wait for playback to complete (with timeout)
       Logger.info(TAG, 'Waiting for playback to complete...');
       const startTime = Date.now();
-      const timeout = 60000; // 60 second timeout
+      const timeout = 30 * 1000; // 30 second timeout (reduced from 60s for faster failure detection)
       
       while (!playbackFinished) {
         if (Date.now() - startTime > timeout) {
@@ -1080,14 +1084,18 @@ export struct AutoTest {
       return FAILED;
 
     } finally {
-      // Clean up resources
+      // Clean up resources - always execute cleanup if renderer was initialized
       this.isRealTimePlaying = false;
       this.audioRendererReady = false;
       
-      if (this.audioRendererReady) {
-        audioNapiExt.stopAudioRenderer();
+      if (rendererInitialized) {
+        Logger.info(TAG, 'Cleaning up audio renderer resources...');
+        if (rendererStarted) {
+          audioNapiExt.stopAudioRenderer();
+        }
         audioNapiExt.releaseAudioRenderer();
         audioNapiExt.unregisterPlaybackFinishCallback();
+        Logger.info(TAG, 'Audio renderer cleanup complete');
       }
     }
   }
